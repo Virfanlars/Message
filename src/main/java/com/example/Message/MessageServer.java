@@ -1,64 +1,76 @@
 package com.example.Message;
 import java.io.*;
 import java.net.*;
+import java.nio.file.*;
+import java.util.concurrent.*;
 import java.util.*;
 
+// Message Server
 public class MessageServer {
     private static final int PORT = 12345;
-    private static final List<PrintWriter> clientWriters = Collections.synchronizedList(new ArrayList<>());
+    private static final String MESSAGE_LOG = "messages.log";
+    private static final Map<String, String> users = new ConcurrentHashMap<>(); // username -> password
+    private static final CopyOnWriteArrayList<Socket> clients = new CopyOnWriteArrayList<>();
 
-    public static void main(String[] args) {
-        System.out.println("服务器启动，等待客户端连接...");
+    static {
+        users.put("user1", "pass1");
+        users.put("user2", "pass2");
+    }
 
-        try (ServerSocket serverSocket = new ServerSocket(PORT)) {
-            while (true) {
-                Socket clientSocket = serverSocket.accept();
-                System.out.println("客户端已连接：" + clientSocket.getInetAddress());
+    public static void main(String[] args) throws IOException {
+        ServerSocket serverSocket = new ServerSocket(PORT);
+        System.out.println("Message Server started on port " + PORT);
 
-                // 启动新线程处理客户端通信
-                new Thread(new ClientHandler(clientSocket)).start();
-            }
-        } catch (IOException e) {
-            e.printStackTrace();
+        while (true) {
+            Socket clientSocket = serverSocket.accept();
+            clients.add(clientSocket);
+            new Thread(new ClientHandler(clientSocket)).start();
         }
     }
 
-    private static class ClientHandler implements Runnable {
-        private Socket socket;
+    static class ClientHandler implements Runnable {
+        private final Socket socket;
 
-        public ClientHandler(Socket socket) {
+        ClientHandler(Socket socket) {
             this.socket = socket;
         }
 
         @Override
         public void run() {
-            try (
-                    BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
-                    PrintWriter out = new PrintWriter(socket.getOutputStream(), true)
-            ) {
-                synchronized (clientWriters) {
-                    clientWriters.add(out);
+            try (BufferedReader in = new BufferedReader(new InputStreamReader(socket.getInputStream()));
+                 PrintWriter out = new PrintWriter(socket.getOutputStream(), true)) {
+                // Authentication
+                out.println("Enter username:");
+                String username = in.readLine();
+                out.println("Enter password:");
+                String password = in.readLine();
+                if (!users.containsKey(username) || !users.get(username).equals(password)) {
+                    out.println("Authentication failed.");
+                    socket.close();
+                    return;
                 }
+                out.println("Authentication successful.");
 
                 String message;
                 while ((message = in.readLine()) != null) {
-                    System.out.println("收到消息: " + message);
-                    broadcast(message);
+                    String logMessage = username + ": " + message;
+                    Files.write(Paths.get(MESSAGE_LOG), (logMessage + "\n").getBytes(), StandardOpenOption.CREATE, StandardOpenOption.APPEND);
+                    System.out.println("Received: " + logMessage);
+                    for (Socket client : clients) {
+                        if (!client.isClosed() && client != socket) {
+                            PrintWriter clientOut = new PrintWriter(client.getOutputStream(), true);
+                            clientOut.println(logMessage);
+                        }
+                    }
                 }
             } catch (IOException e) {
                 e.printStackTrace();
             } finally {
-                synchronized (clientWriters) {
-                    clientWriters.removeIf(writer -> writer.checkError());
-                }
-                System.out.println("客户端断开连接：" + socket.getInetAddress());
-            }
-        }
-
-        private void broadcast(String message) {
-            synchronized (clientWriters) {
-                for (PrintWriter writer : clientWriters) {
-                    writer.println(message);
+                clients.remove(socket);
+                try {
+                    socket.close();
+                } catch (IOException e) {
+                    e.printStackTrace();
                 }
             }
         }
