@@ -7,9 +7,11 @@
 </head>
 <body>
 <h1>Socket Messaging System</h1>
-<input type="text" id="username" placeholder="Username">
-<input type="password" id="password" placeholder="Password">
-<button onclick="login()">Login</button>
+<div id="login">
+    <input type="text" id="username" placeholder="Username"><br>
+    <input type="password" id="password" placeholder="Password"><br>
+    <button onclick="login()">Login</button>
+</div>
 <div id="chat" style="display:none;">
     <input type="text" id="messageInput" placeholder="Enter message">
     <button onclick="sendMessage()">Send</button>
@@ -23,18 +25,25 @@
         const username = document.getElementById('username').value;
         const password = document.getElementById('password').value;
         socket = new WebSocket('ws://localhost:8080');
+
         socket.onopen = () => {
             socket.send(username);
             socket.send(password);
-            document.getElementById('chat').style.display = 'block';
         };
+
         socket.onmessage = (event) => {
-            const messagesDiv = document.getElementById('messages');
-            const messageElement = document.createElement('div');
-            messageElement.textContent = event.data;
-            messagesDiv.appendChild(messageElement);
+            if (event.data.startsWith('Welcome')) {
+                document.getElementById('login').style.display = 'none';
+                document.getElementById('chat').style.display = 'block';
+            } else {
+                const messagesDiv = document.getElementById('messages');
+                const messageElement = document.createElement('div');
+                messageElement.textContent = event.data;
+                messagesDiv.appendChild(messageElement);
+            }
         };
     }
+
     function sendMessage() {
         const input = document.getElementById('messageInput');
         socket.send(input.value);
